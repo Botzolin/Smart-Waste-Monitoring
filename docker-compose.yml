@@ -5,3 +5,12 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/config:/mosquitto/config 
+  
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./data:/app/data

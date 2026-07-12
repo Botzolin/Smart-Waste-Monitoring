@@ -1,0 +1,3 @@
+fastapi # definește API-ul (ce rute există, ce returnează)
+uvicorn[standard] # rulează efectiv serverul pe un port
+paho-mqtt # se conectează la broker, ascultă mesaje MQTT
