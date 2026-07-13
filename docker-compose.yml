@@ -14,3 +14,10 @@ services:
       - mosquitto
     volumes:
       - ./data:/app/data
+
+  simulator:
+    build: ./tools
+    depends_on:
+    - mosquitto
+    volumes:
+    - ./dashboard/containers.json:/app/dashboard/containers.json
