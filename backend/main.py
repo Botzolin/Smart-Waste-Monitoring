@@ -5,6 +5,7 @@ import paho.mqtt.client as mqtt
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import contextmanager
+from route import nearest_neighbour, two_opt
 
 DB_PATH = "data/waste.db"
 MQTT_HOST = "mosquitto"  # numele serviciului din docker-compose
@@ -97,3 +98,60 @@ def get_history(container_id: str, limit: int = 50):
             (container_id, limit)
         ).fetchall()
         return [dict(r) for r in rows] # returnează istoricul măsurătorilor pentru containerul specificat
+    
+
+#------------ROUTE OPTIMIZATION------------#
+
+def load_container_locations():
+    # citim coordonatele fixe ale containerelor (lat/lon), din fisierul comun
+    # folosit si de simulator si de dashboard - sursa unica de adevar
+    with open("dashboard/containers.json") as f:
+        return json.load(f)
+
+# punctul de start/final al masinii de colectare - trebuie sa fie IDENTIC
+# cu DEPOT din index.html, altfel traseul desenat pe harta nu corespunde
+# cu distanta calculata aici
+DEPOT = (44.425926, 26.220867)
+
+@app.get("/route")
+def get_route(min_fill: float = 60.0):
+    # incarcam coordonatele tuturor containerelor cunoscute
+    locations = load_container_locations()
+
+    # luam din baza de date ULTIMA masuratoare a fiecarui container
+    # (acelasi query ca la /containers, doar ca ne intereseaza doar fill_pct)
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT container_id, fill_pct
+            FROM measurements m1
+            WHERE received_at = (
+                SELECT MAX(received_at) FROM measurements m2
+                WHERE m2.container_id = m1.container_id
+            )
+        """).fetchall()
+
+    # pastram doar containerele care:
+    # 1. au fill_pct peste pragul cerut (implicit 60%)
+    # 2. au si o locatie cunoscuta in containers.json (altfel nu stim unde sa mergem)
+    to_collect = {}
+    for row in rows:
+        cid = row["container_id"]
+        if row["fill_pct"] >= min_fill and cid in locations:
+            loc = locations[cid]
+            to_collect[cid] = (loc["lat"], loc["lon"])
+
+    # daca niciun container nu trece pragul, nu are rost sa calculam ruta
+    if not to_collect:
+        return {"route": [], "distance_km": 0, "message": "Niciun container peste prag"}
+
+    # pasul 1: ordine rapida, dar nu neaparat optima (Nearest Neighbour)
+    initial_order = nearest_neighbour(DEPOT, to_collect)
+
+    # pasul 2: rafinam ordinea, incercand sa scurtam traseul (2-opt)
+    optimized_order, distance = two_opt(DEPOT, initial_order, to_collect)
+
+    # returnam doar ce are nevoie dashboard-ul: ordinea finala + distanta totala
+    return {
+        "route": optimized_order,
+        "distance_km": round(distance, 2)
+    }

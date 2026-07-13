@@ -3,116 +3,65 @@
 <head>
 <meta charset="UTF-8">
 <title>Smart Waste Dashboard</title>
-
-<link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-/>
-
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
-html, body{
-    margin:0;
-    height:100%;
-    font-family:Arial,sans-serif;
-}
-
-#map{
-    width:100%;
-    height:100vh;
-}
-#status{
-
-    position:absolute;
-    top:10px;
-    left:70px;
-
-    z-index:1000;
-
-    background:white;
-
-    padding:8px 14px;
-
-    border-radius:8px;
-
-    box-shadow:0 0 8px rgba(0,0,0,.2);
-
-    font-weight:bold;
-
-}
-#sidebar{
-
-    position:absolute;
-
-    top:70px;
-    left:10px;
-
-    z-index:1000;
-
-    background:white;
-
-    padding:15px;
-
-    width:220px;
-
-    border-radius:10px;
-
-    box-shadow:0 0 12px rgba(0,0,0,.2);
-
-    font-family:Arial;
-
-}
-
-#sidebar h3{
-
-    margin-top:0;
-    margin-bottom:15px;
-
-}
-
-#sidebar div{
-
-    margin-bottom:8px;
-
-}
+    html, body { margin: 0; height: 100%; font-family: Arial, sans-serif; }
+    #map { width: 100%; height: 100vh; }
+    #status {
+        position: absolute; top: 10px; left: 70px; z-index: 1000;
+        background: white; padding: 8px 14px; border-radius: 8px;
+        box-shadow: 0 0 8px rgba(0,0,0,.2); font-weight: bold;
+    }
+    #sidebar {
+        position: absolute; top: 70px; left: 10px; z-index: 1000;
+        background: white; padding: 15px; width: 220px;
+        border-radius: 10px; box-shadow: 0 0 12px rgba(0,0,0,.2);
+    }
+    #sidebar h3 { margin-top: 0; margin-bottom: 15px; }
+    #sidebar div { margin-bottom: 8px; }
 </style>
 </head>
-
 <body>
 
-<div id="status">
-    🟢 Backend conectat
-</div>
+<div id="status">🟢 Backend conectat</div>
 <div id="sidebar">
-
     <h3>Smart Waste</h3>
-
     <div>Total containere: <span id="totalContainers">0</span></div>
     <div>🟢 Normale: <span id="normalContainers">0</span></div>
     <div>🟠 Aproape pline: <span id="warningContainers">0</span></div>
     <div>🔴 Critice: <span id="criticalContainers">0</span></div>
     <div>⚪ Fără date: <span id="offlineContainers">0</span></div>
-
 </div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
 
-const map = L.map("map").setView(
-    [44.435, 26.102],
-    14
-);
+// ============================================================
+// CONFIG — valori fixe, schimbate rar
+// ============================================================
+const BACKEND_URL = "http://localhost:8000";
+const DEPOT = { lat: 44.425926, lon: 26.220867 }; // IDENTIC cu DEPOT din backend/main.py
+const REFRESH_CONTAINERS_MS = 5000;   // cat de des reluam /containers
+const REFRESH_ROUTE_MS = 30000;       // cat de des recalculam ruta (OSRM extern, nu il bombardam des)
 
-L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-{
-    attribution:"© OpenStreetMap contributors"
+// ============================================================
+// STARE — variabile globale, se schimba in timpul rularii
+// ============================================================
+let containerLocations = {};  // {id: {lat, lon, note}} - din containers.json
+let markers = {};             // {id: L.circleMarker} - markerele curente de pe harta
+let routeLayer = null;        // linia de ruta curent desenata (ca s-o putem sterge la refresh)
+
+// ============================================================
+// HARTA — initializare Leaflet
+// ============================================================
+const map = L.map("map").setView([44.435, 26.102], 14);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors"
 }).addTo(map);
 
-let containerLocations = {};
-let markers = {};
-
+// referinte catre elementele din sidebar, ca sa nu cautam in DOM de fiecare data
 const status = document.getElementById("status");
 const totalContainers = document.getElementById("totalContainers");
 const normalContainers = document.getElementById("normalContainers");
@@ -120,160 +69,173 @@ const warningContainers = document.getElementById("warningContainers");
 const criticalContainers = document.getElementById("criticalContainers");
 const offlineContainers = document.getElementById("offlineContainers");
 
+// ============================================================
+// INCARCARE DATE — cereri catre fisiere/backend
+// ============================================================
+
+// coordonatele fixe ale containerelor (nu se schimba in timp)
 async function loadLocations() {
-
     try {
-
         const response = await fetch("containers.json");
-
-        if (!response.ok)
-            throw new Error("Nu s-a putut încărca containers.json");
-
+        if (!response.ok) throw new Error("Nu s-a putut încărca containers.json");
         containerLocations = await response.json();
-
-        console.log("Locații:", containerLocations);
-
-    }
-    catch(err) {
-
+    } catch (err) {
         console.error(err);
-
     }
-
 }
+
+// ultima stare (fill_pct, temp_c...) a fiecarui container, de la backend
+async function loadContainers() {
+    try {
+        const response = await fetch(`${BACKEND_URL}/containers`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        status.textContent = "🟢 Backend conectat";
+
+        updateStatistics(data);
+        updateMarkers(data);
+    } catch (err) {
+        status.textContent = "🔴 Backend indisponibil";
+        console.error(err);
+    }
+}
+
+// ordinea de vizitare calculata de backend (NN + 2-opt)
+async function loadRoute() {
+    const response = await fetch(`${BACKEND_URL}/route`);
+    const data = await response.json();
+    return data.route; // ex: ["C04", "C07", "C09"]
+}
+
+// transforma ID-uri de container in coordonate reale, cu depou la capete
+function buildWaypoints(routeIds) {
+    const waypoints = [DEPOT];
+    routeIds.forEach(id => {
+        const loc = containerLocations[id];
+        if (loc) waypoints.push({ lat: loc.lat, lon: loc.lon });
+    });
+    waypoints.push(DEPOT);
+    return waypoints;
+}
+
+// cere geometria reala a drumului de la OSRM (rutare pe strada, nu linie dreapta)
+async function getRouteGeometry(waypoints) {
+    const coords = waypoints.map(p => `${p.lon},${p.lat}`).join(";"); // OSRM vrea lon,lat
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+    return data.routes[0].geometry; // GeoJSON LineString, gata de desenat
+}
+
+// ============================================================
+// AFISARE — actualizare harta si sidebar
+// ============================================================
 
 function getFillColor(fillPct) {
-
-    if (fillPct < 60)
-        return "green";
-
-    if (fillPct < 90)
-        return "orange";
-
+    if (fillPct < 60) return "green";
+    if (fillPct < 90) return "orange";
     return "red";
-
 }
 
+// deseneaza cercurile initiale (gri, "fara date"), o singura data la pornire
 function createMarkers() {
-
     for (const id in containerLocations) {
-
         const info = containerLocations[id];
 
-        markers[id] = L.circleMarker(
-            [info.lat, info.lon],
-            {
-                radius: 10,
-                color: "black",
-                weight: 1,
-                fillColor: "gray",
-                fillOpacity: 0.9
-            }
-        ).addTo(map);
+        markers[id] = L.circleMarker([info.lat, info.lon], {
+            radius: 10, color: "black", weight: 1,
+            fillColor: "gray", fillOpacity: 0.9
+        }).addTo(map);
 
-        markers[id].bindPopup(`
-            <b>${id}</b><br>
-            Status: Fără date<br>
-            Tip: ${info.note}
-        `);
-
+        markers[id].bindPopup(`<b>${id}</b><br>Status: Fără date<br>Tip: ${info.note}`);
     }
-
 }
 
-function updateStatistics(data){
+// deseneaza depoul ca patrat, separat de containere (care sunt cercuri)
+function createDepotMarker() {
+    const depotIcon = L.divIcon({
+        className: "", // fara clasa default Leaflet, folosim doar stilul nostru
+        html: '<div style="width:16px; height:16px; background:#333; border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,.5);"></div>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8] // centreaza iconul pe coordonata exacta
+    });
 
+    L.marker([DEPOT.lat, DEPOT.lon], { icon: depotIcon })
+        .addTo(map)
+        .bindPopup("<b>Depou</b><br>Punct de start/final colectare");
+}
+
+// actualizeaza culoarea + popup-ul markerelor existente, cu date proaspete
+function updateMarkers(data) {
+    data.forEach(container => {
+        const info = containerLocations[container.container_id];
+        if (!info || !markers[container.container_id]) return;
+
+        markers[container.container_id].setStyle({
+            fillColor: getFillColor(container.fill_pct)
+        });
+
+        markers[container.container_id].bindPopup(`
+            <b>${container.container_id}</b><br>
+            Fill: ${container.fill_pct}%<br>
+            Temperature: ${container.temp_c} °C<br>
+            Received: ${container.received_at}<br>
+            Tip: ${info.note}
+        `);
+    });
+}
+
+function updateStatistics(data) {
     const total = Object.keys(containerLocations).length;
-
-    let normal = 0;
-    let warning = 0;
-    let critical = 0;
+    let normal = 0, warning = 0, critical = 0;
 
     data.forEach(container => {
-
-        if(container.fill_pct < 60)
-            normal++;
-
-        else if(container.fill_pct < 90)
-            warning++;
-
-        else
-            critical++;
-
+        if (container.fill_pct < 60) normal++;
+        else if (container.fill_pct < 90) warning++;
+        else critical++;
     });
 
     totalContainers.textContent = total;
-
     normalContainers.textContent = normal;
-
     warningContainers.textContent = warning;
-
     criticalContainers.textContent = critical;
-
-    offlineContainers.textContent =
-        total - normal - warning - critical;
-
+    offlineContainers.textContent = total - normal - warning - critical;
 }
 
-async function loadContainers() {
+// ia ordinea de la backend, cere geometria de la OSRM, deseneaza linia pe harta
+async function drawRoute() {
+    const routeIds = await loadRoute();
+    if (routeIds.length === 0) return; // nimic de colectat, nu desenam nimic
 
-    try {
+    const waypoints = buildWaypoints(routeIds);
+    const geometry = await getRouteGeometry(waypoints);
 
-        const response = await fetch("http://localhost:8000/containers");
+    if (routeLayer) map.removeLayer(routeLayer); // stergem ruta veche
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        updateStatistics(data);
-        status.textContent = "🟢 Backend conectat";
-        console.log("Containere primite:", data);
-        data.forEach(container => {
-
-            const info = containerLocations[container.container_id];
-
-            if (!info)
-                return;
-
-            markers[container.container_id].setStyle({
-                fillColor: getFillColor(container.fill_pct)
-            });
-
-            markers[container.container_id].bindPopup(`
-                <b>${container.container_id}</b><br>
-                Fill: ${container.fill_pct}%<br>
-                Temperature: ${container.temp_c} °C<br>
-                Received: ${container.received_at}<br>
-                Tip: ${info.note}
-            `);
-
-        });
-
-    } catch (err) {
-
-        status.textContent = "🔴 Backend indisponibil";
-
-        console.error(err);
-
-    }
-
+    routeLayer = L.geoJSON(geometry, {
+        style: { color: "blue", weight: 5, opacity: 0.7 }
+    }).addTo(map);
 }
 
+// ============================================================
+// PORNIRE
+// ============================================================
 async function init() {
-
     await loadLocations();
-
     createMarkers();
+    createDepotMarker();
 
     await loadContainers();
+    await drawRoute();
 
-    setInterval(loadContainers, 5000);
+    setInterval(loadContainers, REFRESH_CONTAINERS_MS);
+    setInterval(drawRoute, REFRESH_ROUTE_MS);
 }
 
 init();
 
 </script>
-
 </body>
 </html>
