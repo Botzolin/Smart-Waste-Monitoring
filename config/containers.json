@@ -1,0 +1,12 @@
+{
+  "C01": {"lat": 44.429327, "lon": 26.153198, "note": "fizic - Arduino"},
+  "C02": {"lat": 44.432560, "lon": 26.138800, "note": "simulat"},
+  "C03": {"lat": 44.425021, "lon": 26.141632, "note": "simulat"},
+  "C04": {"lat": 44.418401, "lon": 26.147756, "note": "simulat"},
+  "C05": {"lat": 44.417003, "lon": 26.153491, "note": "simulat"},
+  "C06": {"lat": 44.416276, "lon": 26.157011, "note": "simulat"},
+  "C07": {"lat": 44.416905, "lon": 26.161350, "note": "simulat"},
+  "C08": {"lat": 44.423375, "lon": 26.168588, "note": "simulat"},
+  "C09": {"lat": 44.424393, "lon": 26.168224, "note": "simulat"},
+  "C10": {"lat": 44.423125, "lon": 26.171425, "note": "simulat"}
+}
