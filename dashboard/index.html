@@ -20,11 +20,79 @@ html, body{
     width:100%;
     height:100vh;
 }
+#status{
+
+    position:absolute;
+    top:10px;
+    left:70px;
+
+    z-index:1000;
+
+    background:white;
+
+    padding:8px 14px;
+
+    border-radius:8px;
+
+    box-shadow:0 0 8px rgba(0,0,0,.2);
+
+    font-weight:bold;
+
+}
+#sidebar{
+
+    position:absolute;
+
+    top:70px;
+    left:10px;
+
+    z-index:1000;
+
+    background:white;
+
+    padding:15px;
+
+    width:220px;
+
+    border-radius:10px;
+
+    box-shadow:0 0 12px rgba(0,0,0,.2);
+
+    font-family:Arial;
+
+}
+
+#sidebar h3{
+
+    margin-top:0;
+    margin-bottom:15px;
+
+}
+
+#sidebar div{
+
+    margin-bottom:8px;
+
+}
 </style>
 </head>
 
 <body>
 
+<div id="status">
+    🟢 Backend conectat
+</div>
+<div id="sidebar">
+
+    <h3>Smart Waste</h3>
+
+    <div>Total containere: <span id="totalContainers">0</span></div>
+    <div>🟢 Normale: <span id="normalContainers">0</span></div>
+    <div>🟠 Aproape pline: <span id="warningContainers">0</span></div>
+    <div>🔴 Critice: <span id="criticalContainers">0</span></div>
+    <div>⚪ Fără date: <span id="offlineContainers">0</span></div>
+
+</div>
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -42,6 +110,111 @@ L.tileLayer(
     attribution:"© OpenStreetMap contributors"
 }).addTo(map);
 
+let containerLocations = {};
+let markers = {};
+
+const status = document.getElementById("status");
+const totalContainers = document.getElementById("totalContainers");
+const normalContainers = document.getElementById("normalContainers");
+const warningContainers = document.getElementById("warningContainers");
+const criticalContainers = document.getElementById("criticalContainers");
+const offlineContainers = document.getElementById("offlineContainers");
+
+async function loadLocations() {
+
+    try {
+
+        const response = await fetch("containers.json");
+
+        if (!response.ok)
+            throw new Error("Nu s-a putut încărca containers.json");
+
+        containerLocations = await response.json();
+
+        console.log("Locații:", containerLocations);
+
+    }
+    catch(err) {
+
+        console.error(err);
+
+    }
+
+}
+
+function getFillColor(fillPct) {
+
+    if (fillPct < 60)
+        return "green";
+
+    if (fillPct < 90)
+        return "orange";
+
+    return "red";
+
+}
+
+function createMarkers() {
+
+    for (const id in containerLocations) {
+
+        const info = containerLocations[id];
+
+        markers[id] = L.circleMarker(
+            [info.lat, info.lon],
+            {
+                radius: 10,
+                color: "black",
+                weight: 1,
+                fillColor: "gray",
+                fillOpacity: 0.9
+            }
+        ).addTo(map);
+
+        markers[id].bindPopup(`
+            <b>${id}</b><br>
+            Status: Fără date<br>
+            Tip: ${info.note}
+        `);
+
+    }
+
+}
+
+function updateStatistics(data){
+
+    const total = Object.keys(containerLocations).length;
+
+    let normal = 0;
+    let warning = 0;
+    let critical = 0;
+
+    data.forEach(container => {
+
+        if(container.fill_pct < 60)
+            normal++;
+
+        else if(container.fill_pct < 90)
+            warning++;
+
+        else
+            critical++;
+
+    });
+
+    totalContainers.textContent = total;
+
+    normalContainers.textContent = normal;
+
+    warningContainers.textContent = warning;
+
+    criticalContainers.textContent = critical;
+
+    offlineContainers.textContent =
+        total - normal - warning - critical;
+
+}
+
 async function loadContainers() {
 
     try {
@@ -53,18 +226,52 @@ async function loadContainers() {
         }
 
         const data = await response.json();
-
+        updateStatistics(data);
+        status.textContent = "🟢 Backend conectat";
         console.log("Containere primite:", data);
+        data.forEach(container => {
+
+            const info = containerLocations[container.container_id];
+
+            if (!info)
+                return;
+
+            markers[container.container_id].setStyle({
+                fillColor: getFillColor(container.fill_pct)
+            });
+
+            markers[container.container_id].bindPopup(`
+                <b>${container.container_id}</b><br>
+                Fill: ${container.fill_pct}%<br>
+                Temperature: ${container.temp_c} °C<br>
+                Received: ${container.received_at}<br>
+                Tip: ${info.note}
+            `);
+
+        });
 
     } catch (err) {
 
-        console.error("Eroare la fetch:", err);
+        status.textContent = "🔴 Backend indisponibil";
+
+        console.error(err);
 
     }
 
 }
 
-loadContainers();
+async function init() {
+
+    await loadLocations();
+
+    createMarkers();
+
+    await loadContainers();
+
+    setInterval(loadContainers, 5000);
+}
+
+init();
 
 </script>
 
