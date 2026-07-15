@@ -2,113 +2,360 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8">
-<title>Smart Waste Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Waste — Operations</title>
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
 <style>
-    html, body { margin: 0; height: 100%; font-family: Arial, sans-serif; }
-    #map { width: 100%; height: 100vh; }
-    #status {
-        position: absolute; top: 10px; left: 70px; z-index: 1000;
-        background: white; padding: 8px 14px; border-radius: 8px;
-        box-shadow: 0 0 8px rgba(0,0,0,.2); font-weight: bold;
+/* ============================================================
+   TOKENS — paleta si fonturi, un singur loc de schimbat
+   ============================================================ */
+:root {
+    --ink:        #12161C;   /* fundal panou */
+    --panel:      #1A2028;   /* carduri in panou */
+    --line:       #2A323D;   /* borduri subtile */
+    --text:       #E9ECF0;
+    --muted:      #8B95A1;
+    --ok:         #3DBE6C;   /* sub 60% */
+    --warn:       #F5A623;   /* 60-89% */
+    --crit:       #E5484D;   /* 90%+ */
+    --nodata:     #5A6470;
+    --route:      #2F6FED;   /* linia de traseu */
+    --font-disp:  "Space Grotesk", sans-serif;
+    --font-mono:  "IBM Plex Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; height: 100%;
+    font-family: var(--font-disp);
+    background: var(--ink);
+    color: var(--text);
+}
+
+/* ============================================================
+   LAYOUT — panou fix stanga + harta pe restul ecranului
+   ============================================================ */
+#app { display: flex; height: 100vh; }
+
+#panel {
+    width: 320px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    background: var(--ink);
+    border-right: 1px solid var(--line);
+    overflow: hidden;
+}
+
+#map { flex: 1; height: 100%; background: #0d1117; }
+
+/* ============================================================
+   HEADER PANOU
+   ============================================================ */
+#panel header {
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid var(--line);
+}
+
+#panel h1 {
+    margin: 0 0 2px;
+    font-size: 17px; font-weight: 700; letter-spacing: .2px;
+}
+
+#panel h1 span { color: var(--muted); font-weight: 500; }
+
+.conn {
+    display: inline-flex; align-items: center; gap: 7px;
+    margin-top: 10px;
+    font-family: var(--font-mono); font-size: 11.5px;
+    color: var(--muted);
+}
+
+.conn .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ok);
+    animation: pulse 2s infinite;
+}
+
+.conn.down .dot { background: var(--crit); animation: none; }
+
+@keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(61,190,108,.45); }
+    70%  { box-shadow: 0 0 0 7px rgba(61,190,108,0); }
+    100% { box-shadow: 0 0 0 0 rgba(61,190,108,0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .conn .dot { animation: none; }
+    .bar i { transition: none; }
+}
+
+/* ============================================================
+   STATISTICI — 4 celule compacte
+   ============================================================ */
+#stats {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--line);
+    border-bottom: 1px solid var(--line);
+}
+
+.stat {
+    background: var(--ink);
+    padding: 12px 20px 14px;
+}
+
+.stat .num {
+    font-family: var(--font-mono);
+    font-size: 22px; font-weight: 600; line-height: 1.1;
+}
+
+.stat .lbl {
+    font-size: 11px; color: var(--muted);
+    margin-top: 2px; letter-spacing: .3px;
+}
+
+.stat.ok .num   { color: var(--ok); }
+.stat.warn .num { color: var(--warn); }
+.stat.crit .num { color: var(--crit); }
+
+/* ============================================================
+   TRASEU — bara de sumar
+   ============================================================ */
+#routeinfo {
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+
+#routeinfo .k { font-size: 11px; color: var(--muted); letter-spacing: .3px; }
+#routeinfo .v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+#routeinfo .v em { font-style: normal; color: var(--route); }
+
+/* ============================================================
+   LISTA CONTAINERE — un card per container, cu bara de umplere
+   ============================================================ */
+#list {
+    flex: 1; overflow-y: auto;
+    padding: 8px 12px 16px;
+}
+
+#list::-webkit-scrollbar { width: 8px; }
+#list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    cursor: pointer;
+    transition: border-color .15s;
+}
+
+.card:hover { border-color: var(--muted); }
+
+.card .row1 {
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+
+.card .cid {
+    font-family: var(--font-mono);
+    font-size: 13px; font-weight: 600;
+}
+
+.card .pct {
+    font-family: var(--font-mono);
+    font-size: 13px; font-weight: 600;
+}
+
+.card .meta {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10.5px; color: var(--muted);
+    margin-top: 3px;
+}
+
+/* bara de umplere - elementul central al fiecarui card */
+.bar {
+    height: 5px; border-radius: 3px;
+    background: #262d37;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.bar i {
+    display: block; height: 100%;
+    border-radius: 3px;
+    width: 0%;
+    transition: width .6s ease;
+}
+
+.c-ok   { color: var(--ok); }    .b-ok   { background: var(--ok); }
+.c-warn { color: var(--warn); }  .b-warn { background: var(--warn); }
+.c-crit { color: var(--crit); }  .b-crit { background: var(--crit); }
+.c-nodata { color: var(--nodata); } .b-nodata { background: var(--nodata); }
+
+/* ============================================================
+   MARKERE PE HARTA — cerc cu procent in interior
+   ============================================================ */
+.cmarker {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 50%;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    color: #fff; border: 2px solid rgba(255,255,255,.85);
+    box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+
+.dmarker {
+    width: 18px; height: 18px;
+    background: var(--text);
+    border: 3px solid var(--ink);
+    box-shadow: 0 0 0 2px var(--text), 0 2px 8px rgba(0,0,0,.5);
+}
+
+/* popup Leaflet, restilizat pe tema inchisa */
+.leaflet-popup-content-wrapper {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-family: var(--font-mono); font-size: 12px;
+}
+.leaflet-popup-tip { background: var(--panel); }
+.leaflet-popup-content b { font-family: var(--font-disp); font-size: 13px; }
+
+/* ============================================================
+   MOBILE — panoul devine drawer jos
+   ============================================================ */
+@media (max-width: 760px) {
+    #app { flex-direction: column-reverse; }
+    #panel {
+        width: 100%; height: 45vh;
+        border-right: none; border-top: 1px solid var(--line);
     }
-    #sidebar {
-        position: absolute; top: 70px; left: 10px; z-index: 1000;
-        background: white; padding: 15px; width: 220px;
-        border-radius: 10px; box-shadow: 0 0 12px rgba(0,0,0,.2);
-    }
-    #sidebar h3 { margin-top: 0; margin-bottom: 15px; }
-    #sidebar div { margin-bottom: 8px; }
+}
 </style>
 </head>
 <body>
 
-<div id="status">🟢 Backend conectat</div>
-<div id="sidebar">
-    <h3>Smart Waste</h3>
-    <div>Total containere: <span id="totalContainers">0</span></div>
-    <div>🟢 Normale: <span id="normalContainers">0</span></div>
-    <div>🟠 Aproape pline: <span id="warningContainers">0</span></div>
-    <div>🔴 Critice: <span id="criticalContainers">0</span></div>
-    <div>⚪ Fără date: <span id="offlineContainers">0</span></div>
+<div id="app">
+
+    <div id="panel">
+        <header>
+            <h1>SMART WASTE <span>/ operations</span></h1>
+            <div class="conn" id="conn">
+                <span class="dot"></span>
+                <span id="connText">conectare...</span>
+            </div>
+        </header>
+
+        <div id="stats">
+            <div class="stat ok">
+                <div class="num" id="stNormal">–</div>
+                <div class="lbl">Normale &lt;60%</div>
+            </div>
+            <div class="stat warn">
+                <div class="num" id="stWarn">–</div>
+                <div class="lbl">Aproape pline</div>
+            </div>
+            <div class="stat crit">
+                <div class="num" id="stCrit">–</div>
+                <div class="lbl">Critice ≥90%</div>
+            </div>
+            <div class="stat">
+                <div class="num" id="stOffline">–</div>
+                <div class="lbl">Fără date</div>
+            </div>
+        </div>
+
+        <div id="routeinfo">
+            <span class="k">TRASEU COLECTARE</span>
+            <span class="v" id="routeText">–</span>
+        </div>
+
+        <div id="list"></div>
+    </div>
+
+    <div id="map"></div>
+
 </div>
-<div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 
 // ============================================================
-// CONFIG — valori fixe, schimbate rar
+// CONFIG
 // ============================================================
 const BACKEND_URL = "http://localhost:8000";
 const DEPOT = { lat: 44.425926, lon: 26.220867 }; // IDENTIC cu DEPOT din backend/main.py
-const REFRESH_CONTAINERS_MS = 5000;   // cat de des reluam /containers
-const REFRESH_ROUTE_MS = 30000;       // cat de des recalculam ruta (OSRM extern, nu il bombardam des)
+const REFRESH_CONTAINERS_MS = 5000;
+const REFRESH_ROUTE_MS = 30000;
 
 // ============================================================
-// STARE — variabile globale, se schimba in timpul rularii
+// STARE
 // ============================================================
-let containerLocations = {};  // {id: {lat, lon, note}} - din containers.json
-let markers = {};             // {id: L.circleMarker} - markerele curente de pe harta
-let routeLayer = null;        // linia de ruta curent desenata (ca s-o putem sterge la refresh)
+let containerLocations = {};
+let markers = {};       // {id: L.marker}
+let cards = {};         // {id: element .card din lista}
+let routeLayer = null;
 
 // ============================================================
-// HARTA — initializare Leaflet
+// HARTA — tile-uri intunecate, potrivite cu panoul
 // ============================================================
-const map = L.map("map").setView([44.435, 26.102], 14);
+const map = L.map("map", { zoomControl: false }).setView([44.435, 26.102], 13);
+L.control.zoom({ position: "bottomright" }).addTo(map);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors"
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    maxZoom: 19
 }).addTo(map);
 
-// referinte catre elementele din sidebar, ca sa nu cautam in DOM de fiecare data
-const status = document.getElementById("status");
-const totalContainers = document.getElementById("totalContainers");
-const normalContainers = document.getElementById("normalContainers");
-const warningContainers = document.getElementById("warningContainers");
-const criticalContainers = document.getElementById("criticalContainers");
-const offlineContainers = document.getElementById("offlineContainers");
-
 // ============================================================
-// INCARCARE DATE — cereri catre fisiere/backend
+// HELPERS — clasificare stare dupa fill_pct
 // ============================================================
-
-// coordonatele fixe ale containerelor (nu se schimba in timp)
-async function loadLocations() {
-    try {
-        const response = await fetch("containers.json");
-        if (!response.ok) throw new Error("Nu s-a putut încărca containers.json");
-        containerLocations = await response.json();
-    } catch (err) {
-        console.error(err);
-    }
+function levelOf(pct) {
+    if (pct == null) return "nodata";
+    if (pct < 60) return "ok";
+    if (pct < 90) return "warn";
+    return "crit";
 }
 
-// ultima stare (fill_pct, temp_c...) a fiecarui container, de la backend
+const LEVEL_COLOR = { ok: "#3DBE6C", warn: "#F5A623", crit: "#E5484D", nodata: "#5A6470" };
+
+// ============================================================
+// INCARCARE DATE
+// ============================================================
+async function loadLocations() {
+    const response = await fetch("containers.json");
+    if (!response.ok) throw new Error("Nu s-a putut încărca containers.json");
+    containerLocations = await response.json();
+}
+
 async function loadContainers() {
+    const conn = document.getElementById("conn");
+    const connText = document.getElementById("connText");
     try {
         const response = await fetch(`${BACKEND_URL}/containers`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
         const data = await response.json();
-        status.textContent = "🟢 Backend conectat";
 
-        updateStatistics(data);
-        updateMarkers(data);
+        conn.classList.remove("down");
+        connText.textContent = "backend conectat";
+
+        updateAll(data);
     } catch (err) {
-        status.textContent = "🔴 Backend indisponibil";
+        conn.classList.add("down");
+        connText.textContent = "backend indisponibil";
         console.error(err);
     }
 }
 
-// ordinea de vizitare calculata de backend (NN + 2-opt)
 async function loadRoute() {
     const response = await fetch(`${BACKEND_URL}/route`);
-    const data = await response.json();
-    return data.route; // ex: ["C04", "C07", "C09"]
+    return await response.json(); // {route: [...], distance_km: N}
 }
 
-// transforma ID-uri de container in coordonate reale, cu depou la capete
 function buildWaypoints(routeIds) {
     const waypoints = [DEPOT];
     routeIds.forEach(id => {
@@ -119,113 +366,167 @@ function buildWaypoints(routeIds) {
     return waypoints;
 }
 
-// cere geometria reala a drumului de la OSRM (rutare pe strada, nu linie dreapta)
 async function getRouteGeometry(waypoints) {
     const coords = waypoints.map(p => `${p.lon},${p.lat}`).join(";"); // OSRM vrea lon,lat
     const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
-
     const response = await fetch(url);
     const data = await response.json();
-    return data.routes[0].geometry; // GeoJSON LineString, gata de desenat
+    return data.routes[0].geometry;
 }
 
 // ============================================================
-// AFISARE — actualizare harta si sidebar
+// MARKERE — cerc colorat cu procentul scris in interior
 // ============================================================
-
-function getFillColor(fillPct) {
-    if (fillPct < 60) return "green";
-    if (fillPct < 90) return "orange";
-    return "red";
+function makeMarkerIcon(pct) {
+    const lvl = levelOf(pct);
+    const label = pct == null ? "–" : Math.round(pct) + "%";
+    return L.divIcon({
+        className: "",
+        html: `<div class="cmarker" style="background:${LEVEL_COLOR[lvl]}">${label}</div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+    });
 }
 
-// deseneaza cercurile initiale (gri, "fara date"), o singura data la pornire
 function createMarkers() {
     for (const id in containerLocations) {
         const info = containerLocations[id];
-
-        markers[id] = L.circleMarker([info.lat, info.lon], {
-            radius: 10, color: "black", weight: 1,
-            fillColor: "gray", fillOpacity: 0.9
-        }).addTo(map);
-
-        markers[id].bindPopup(`<b>${id}</b><br>Status: Fără date<br>Tip: ${info.note}`);
+        markers[id] = L.marker([info.lat, info.lon], { icon: makeMarkerIcon(null) })
+            .addTo(map)
+            .bindPopup(`<b>${id}</b><br>Fără date încă<br>${info.note}`);
     }
 }
 
-// deseneaza depoul ca patrat, separat de containere (care sunt cercuri)
 function createDepotMarker() {
     const depotIcon = L.divIcon({
-        className: "", // fara clasa default Leaflet, folosim doar stilul nostru
-        html: '<div style="width:16px; height:16px; background:#333; border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,.5);"></div>',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8] // centreaza iconul pe coordonata exacta
+        className: "",
+        html: '<div class="dmarker"></div>',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
     });
-
     L.marker([DEPOT.lat, DEPOT.lon], { icon: depotIcon })
         .addTo(map)
-        .bindPopup("<b>Depou</b><br>Punct de start/final colectare");
+        .bindPopup("<b>Depou</b><br>Start / final colectare");
 }
 
-// actualizeaza culoarea + popup-ul markerelor existente, cu date proaspete
-function updateMarkers(data) {
-    data.forEach(container => {
-        const info = containerLocations[container.container_id];
-        if (!info || !markers[container.container_id]) return;
-
-        markers[container.container_id].setStyle({
-            fillColor: getFillColor(container.fill_pct)
+// ============================================================
+// LISTA DIN PANOU — un card per container, cu bara de umplere
+// ============================================================
+function createCards() {
+    const list = document.getElementById("list");
+    for (const id in containerLocations) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+            <div class="row1">
+                <span class="cid">${id}</span>
+                <span class="pct c-nodata">–</span>
+            </div>
+            <div class="bar"><i class="b-nodata"></i></div>
+            <div class="meta">
+                <span class="temp">–</span>
+                <span class="note">${containerLocations[id].note}</span>
+            </div>
+        `;
+        // click pe card -> centreaza harta pe containerul respectiv
+        card.addEventListener("click", () => {
+            const loc = containerLocations[id];
+            map.setView([loc.lat, loc.lon], 15);
+            markers[id].openPopup();
         });
+        list.appendChild(card);
+        cards[id] = card;
+    }
+}
 
-        markers[container.container_id].bindPopup(`
-            <b>${container.container_id}</b><br>
-            Fill: ${container.fill_pct}%<br>
-            Temperature: ${container.temp_c} °C<br>
-            Received: ${container.received_at}<br>
-            Tip: ${info.note}
+// ============================================================
+// UPDATE — un singur loc care actualizeaza si harta si panoul
+// ============================================================
+function updateAll(data) {
+    let normal = 0, warn = 0, crit = 0;
+    const seen = new Set();
+
+    data.forEach(c => {
+        const id = c.container_id;
+        if (!containerLocations[id]) return;
+        seen.add(id);
+
+        const lvl = levelOf(c.fill_pct);
+        if (lvl === "ok") normal++;
+        else if (lvl === "warn") warn++;
+        else crit++;
+
+        // marker: icon nou cu procentul actualizat
+        markers[id].setIcon(makeMarkerIcon(c.fill_pct));
+        markers[id].bindPopup(`
+            <b>${id}</b><br>
+            Umplere: ${c.fill_pct}%<br>
+            Temp: ${c.temp_c} °C<br>
+            Ultima actualizare: ${c.received_at}
         `);
-    });
-}
 
-function updateStatistics(data) {
+        // card: procent, bara, temperatura
+        const card = cards[id];
+        const pctEl = card.querySelector(".pct");
+        const barEl = card.querySelector(".bar i");
+        pctEl.textContent = c.fill_pct + "%";
+        pctEl.className = "pct c-" + lvl;
+        barEl.style.width = c.fill_pct + "%";
+        barEl.className = "b-" + lvl;
+        card.querySelector(".temp").textContent = c.temp_c + " °C";
+    });
+
     const total = Object.keys(containerLocations).length;
-    let normal = 0, warning = 0, critical = 0;
-
-    data.forEach(container => {
-        if (container.fill_pct < 60) normal++;
-        else if (container.fill_pct < 90) warning++;
-        else critical++;
-    });
-
-    totalContainers.textContent = total;
-    normalContainers.textContent = normal;
-    warningContainers.textContent = warning;
-    criticalContainers.textContent = critical;
-    offlineContainers.textContent = total - normal - warning - critical;
+    document.getElementById("stNormal").textContent = normal;
+    document.getElementById("stWarn").textContent = warn;
+    document.getElementById("stCrit").textContent = crit;
+    document.getElementById("stOffline").textContent = total - seen.size;
 }
 
-// ia ordinea de la backend, cere geometria de la OSRM, deseneaza linia pe harta
+// ============================================================
+// TRASEU
+// ============================================================
 async function drawRoute() {
-    const routeIds = await loadRoute();
-    if (routeIds.length === 0) return; // nimic de colectat, nu desenam nimic
+    try {
+        const data = await loadRoute();
+        const ids = data.route || [];
+        const km = data.distance_km || 0;
 
-    const waypoints = buildWaypoints(routeIds);
-    const geometry = await getRouteGeometry(waypoints);
+        const routeText = document.getElementById("routeText");
+        if (ids.length === 0) {
+            routeText.textContent = "niciun container peste prag";
+            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+            return;
+        }
 
-    if (routeLayer) map.removeLayer(routeLayer); // stergem ruta veche
+        routeText.innerHTML = `${ids.length} opriri · <em>${km} km</em>`;
 
-    routeLayer = L.geoJSON(geometry, {
-        style: { color: "blue", weight: 5, opacity: 0.7 }
-    }).addTo(map);
+        const waypoints = buildWaypoints(ids);
+        const geometry = await getRouteGeometry(waypoints);
+
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = L.geoJSON(geometry, {
+            style: { color: "#2F6FED", weight: 4, opacity: .85 }
+        }).addTo(map);
+    } catch (err) {
+        console.error("Eroare traseu:", err);
+    }
 }
 
 // ============================================================
 // PORNIRE
 // ============================================================
 async function init() {
-    await loadLocations();
+    try {
+        await loadLocations();
+    } catch (err) {
+        console.error(err);
+        return;
+    }
+
     createMarkers();
     createDepotMarker();
+    createCards();
 
     await loadContainers();
     await drawRoute();
